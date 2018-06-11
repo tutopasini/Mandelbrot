@@ -2,40 +2,18 @@
 #include <X11/Xlib.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 
-pthread_mutex_t mutex_work;
-pthread_mutex_t mutex_result;
-pthread_cond_t cond_work;
-pthread_cond_t cond_result;
-
-// Bordas da janela
-double xmin;
-double xmax;
-double ymin;
-double ymax;
-
-// Número de iterações de mandelbrot
-const int maxiter = 65535;
-
-// Tamanho da janela
-int xres;
-int yres;
-
-int num_itens_work = 0;
-int done_work = 0;
-int num_itens_result = 0;
-int done_result = 0;
-
-void *mandelbrot(void *);
-void *print_mandelbrot(void *);
-void *insert_result();
+// Struct inserida no buffer de resultado, contendo a posição e cor
 
 struct point {
     int x;
     int y;
     unsigned long color;
 };
+
+// Struct inserida no buffer de trabalho, contendo x e y inicial e final
 
 struct work {
     int xi;
@@ -45,22 +23,56 @@ struct work {
 };
 
 // Número de threads
-const int NUM_THREADS = 10;
+const int NUM_THREADS = 20;
 // Buffer de trabalho
 struct work work_buff[10000];
 // Buffer de resultado
 struct point result_buff[1000000];
 
+void *mandelbrot(void *);
+void *print_mandelbrot(void *);
+void *insert_result();
+
+pthread_mutex_t mutex_work;
+pthread_mutex_t mutex_result;
+pthread_cond_t cond_work;
+pthread_cond_t cond_result;
+
+// Área para cálculo do Mandelbrot
+double xmin;
+double xmax;
+double ymin;
+double ymax;
+
+// Número de iterações de mandelbrot
+const int maxiter = 65535;
+
+// Tamanho da janela
+const int xres = 400;
+// Calcula automático com base em xres e xmin/xmax/ymin/ymax
+int yres;
+
+// Quantidade de itens no buffer de trabalho
+int num_itens_work = 0;
+// Indica se parou de adicionar no buffer de trabalho
+int done_work = 0;
+// Quantidade de itens no buffer de resultado
+int num_itens_result = 0;
+// Indica se parou de adicionar no buffer de resultado
+int done_result = 0;
+
 int main(int argc, char* argv[]) {
 
+    // Define área que será calculada
     xmin = -1;
     xmax = 1;
     ymin = -1;
     ymax = 1;
 
-    xres = 400;
+    // Calcula a resolução Y
     yres = (xres * (ymax - ymin)) / (xmax - xmin);
 
+    // Inicializa threads
     pthread_t threads[NUM_THREADS];
     pthread_t thread_printer;
     // Inicializa variáveis de condição e mutex
@@ -77,7 +89,8 @@ int main(int argc, char* argv[]) {
 
     int xi, yi = 0;
     int xf, yf = 0;
-    
+
+    // Laço de inserção no buffer de trabalho
     while (xf <= xres || yf <= yres) {
         xi = xf;
         yf = yi + yres / 10;
@@ -90,6 +103,7 @@ int main(int argc, char* argv[]) {
 
         pthread_mutex_lock(&mutex_work);
 
+        // Insere no buffer de trabalho
         work_buff[num_itens_work].xi = xi;
         work_buff[num_itens_work].yi = yi;
         work_buff[num_itens_work].xf = xf;
@@ -106,9 +120,18 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
+    // Indica que parou de adicionar trabalho
     done_result = 1;
-
+    pthread_mutex_destroy(&mutex_work);
+    pthread_cond_destroy(&cond_work);
+    
+    // Libera a thread printer (pode estar aguardando a variável de condição)
+    pthread_cond_signal(&cond_result);
+    // Join na thread printer
     pthread_join(thread_printer, NULL);
+    pthread_mutex_destroy(&mutex_result);
+    pthread_cond_destroy(&cond_result);
+    sleep(5);
 
     return 0;
 }
@@ -117,39 +140,58 @@ int main(int argc, char* argv[]) {
 
 void *print_mandelbrot(void *str) {
 
+    // Cria display
     Display * display = XOpenDisplay(NULL);
 
+    // Cria janela
     Window janela = XCreateSimpleWindow(display, DefaultRootWindow(display),
             0, 0, xres, yres, 0, 0, 0xffffffff);
 
+    // Cria GC
     GC gc = XCreateGC(display, janela, 0, NULL);
+
+    // Mapeia display/janela
     XMapWindow(display, janela);
 
+    // Laço para consumir o buffer de resultado e desenhar na tela
     while (!done_result || num_itens_result > 0) {
 
         pthread_mutex_lock(&mutex_result);
-        while (num_itens_result <= 0)
+        while (num_itens_result <= 0) {
             pthread_cond_wait(&cond_result, &mutex_result);
-        // Desenha ponto na tela
+            // Se finalizou e não tem mais o que desenhar
+            if (done_result && num_itens_result <= 0)
+                break;
+        }
         num_itens_result--;
+        // Define cor do ponto
         XSetForeground(display, gc, result_buff[num_itens_result].color);
+        // Desenha ponto na tela
         XDrawPoint(display, janela, gc,
                 result_buff[num_itens_result].x,
                 result_buff[num_itens_result].y);
         pthread_mutex_unlock(&mutex_result);
         XFlush(display);
-
     }
+    return 0;
 }
+
+// Cálculo de Mandelbrot
 
 void *mandelbrot(void *str) {
 
     double xi, yi, xf, yf;
-
+    // Enquanto não parou de adicionar trabalho e houver trabalho
     while (!done_work || num_itens_work > 0) {
+
         pthread_mutex_lock(&mutex_work);
-        while (num_itens_work <= 0)
+        while (num_itens_work <= 0) {
             pthread_cond_wait(&cond_work, &mutex_work);
+            // Se parou de adicionar trabalho e não tem mais trabalho
+            if (done_work && num_itens_work <= 0)
+                break;
+        }
+        // Busca do buffer de trabalho
         num_itens_work--;
         xi = work_buff[num_itens_work].xi;
         yi = work_buff[num_itens_work].yi;
@@ -184,19 +226,20 @@ void *mandelbrot(void *str) {
                     insert_result(i, j, 0);
                 } else {
                     // Cor de fora do conjunto de Mandelbrot
-//                    unsigned char color[6];
-//                    color[0] = k >> 8;
-//                    color[1] = k & 255;
-//                    color[2] = k >> 8;
-//                    color[3] = k & 255;
-//                    color[4] = k >> 8;
-//                    color[5] = k & 255;
+                    //                    unsigned char color[6];
+                    //                    color[0] = k >> 8;
+                    //                    color[1] = k & 255;
+                    //                    color[2] = k >> 8;
+                    //                    color[3] = k & 255;
+                    //                    color[4] = k >> 8;
+                    //                    color[5] = k & 255;
                     // Coloca a cor no buffer de resultado
                     insert_result(i, j, 0xffffffff);
                 }
             }
         }
     }
+    return 0;
 }
 
 // Coloca a cor no buffer de resultado
