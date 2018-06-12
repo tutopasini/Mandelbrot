@@ -25,9 +25,9 @@ struct work {
 // Número de threads
 const int NUM_THREADS = 5;
 // Buffer de trabalho
-struct work work_buff[10000];
+struct work buff_trabalho[10000];
 // Buffer de resultado
-struct point result_buff[1000000];
+struct point buff_desenho[1000000];
 
 void *mandelbrot(void *);
 void *print_mandelbrot(void *);
@@ -91,6 +91,7 @@ int main(int argc, char* argv[]) {
     int xf = 0, yf = 0;
 
     // Laço de inserção no buffer de trabalho
+    // Buffer que divide a tela em quadrados (pontos iniciais e finais)
     while (xf <= xres || yf <= yres) {
         xi = xf;
 
@@ -104,12 +105,13 @@ int main(int argc, char* argv[]) {
         pthread_mutex_lock(&mutex_work);
 
         // Insere no buffer de trabalho
-        work_buff[num_itens_work].xi = xi;
-        work_buff[num_itens_work].yi = yi;
-        work_buff[num_itens_work].xf = xf;
-        work_buff[num_itens_work].yf = yf;
+        buff_trabalho[num_itens_work].xi = xi;
+        buff_trabalho[num_itens_work].yi = yi;
+        buff_trabalho[num_itens_work].xf = xf;
+        buff_trabalho[num_itens_work].yf = yf;
         num_itens_work++;
 
+        // Envia o sinal
         pthread_cond_signal(&cond_work);
         pthread_mutex_unlock(&mutex_work);
 
@@ -117,6 +119,7 @@ int main(int argc, char* argv[]) {
     done_work = 1;
 
     // Join em todas as threads
+    // Aguarda as threads finalizarem
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
@@ -161,15 +164,15 @@ void *print_mandelbrot(void *str) {
             pthread_cond_wait(&cond_result, &mutex_result);
             // Se finalizou e não tem mais o que desenhar
             if (done_result && num_itens_result <= 0)
-                break;
+                return 0;
         }
         num_itens_result--;
         // Define cor do ponto
-        XSetForeground(display, gc, result_buff[num_itens_result].color);
+        XSetForeground(display, gc, buff_desenho[num_itens_result].color);
         // Desenha ponto na tela
         XDrawPoint(display, janela, gc,
-                result_buff[num_itens_result].x,
-                result_buff[num_itens_result].y);
+                buff_desenho[num_itens_result].x,
+                buff_desenho[num_itens_result].y);
         pthread_mutex_unlock(&mutex_result);
         XFlush(display);
     }
@@ -184,19 +187,21 @@ void *mandelbrot(void *str) {
     // Enquanto não parou de adicionar trabalho e houver trabalho
     while (!done_work || num_itens_work > 0) {
 
+        // Bloqueia acesso ao buffer de trabalho
         pthread_mutex_lock(&mutex_work);
         while (num_itens_work <= 0) {
+            // Aguarda até receber um sinal
             pthread_cond_wait(&cond_work, &mutex_work);
             // Se parou de adicionar trabalho e não tem mais trabalho
             if (done_work && num_itens_work <= 0)
-                break;
+                return 0;
         }
         // Busca do buffer de trabalho
         num_itens_work--;
-        xi = work_buff[num_itens_work].xi;
-        yi = work_buff[num_itens_work].yi;
-        xf = work_buff[num_itens_work].xf;
-        yf = work_buff[num_itens_work].yf;
+        xi = buff_trabalho[num_itens_work].xi;
+        yi = buff_trabalho[num_itens_work].yi;
+        xf = buff_trabalho[num_itens_work].xf;
+        yf = buff_trabalho[num_itens_work].yf;
         pthread_mutex_unlock(&mutex_work);
 
         double dx = (xmax - xmin) / xres;
@@ -225,15 +230,7 @@ void *mandelbrot(void *str) {
                     // Coloca a cor preta no buffer de resultado
                     insert_result(i, j, 0);
                 } else {
-                    // Cor de fora do conjunto de Mandelbrot
-                    //                    unsigned char color[6];
-                    //                    color[0] = k >> 8;
-                    //                    color[1] = k & 255;
-                    //                    color[2] = k >> 8;
-                    //                    color[3] = k & 255;
-                    //                    color[4] = k >> 8;
-                    //                    color[5] = k & 255;
-                    // Coloca a cor no buffer de resultado
+                    // Coloca a cor branca no buffer de resultado
                     insert_result(i, j, 0xffffffff);
                 }
             }
@@ -246,9 +243,9 @@ void *mandelbrot(void *str) {
 
 void *insert_result(int x, int y, unsigned long color) {
     pthread_mutex_lock(&mutex_result);
-    result_buff[num_itens_result].x = x;
-    result_buff[num_itens_result].y = y;
-    result_buff[num_itens_result].color = color;
+    buff_desenho[num_itens_result].x = x;
+    buff_desenho[num_itens_result].y = y;
+    buff_desenho[num_itens_result].color = color;
     num_itens_result++;
     pthread_cond_signal(&cond_result);
     pthread_mutex_unlock(&mutex_result);
