@@ -23,7 +23,7 @@ struct work {
 };
 
 // Número de threads
-const int NUM_THREADS = 20;
+const int NUM_THREADS = 5;
 // Buffer de trabalho
 struct work work_buff[10000];
 // Buffer de resultado
@@ -64,10 +64,10 @@ int done_result = 0;
 int main(int argc, char* argv[]) {
 
     // Define área que será calculada
-    xmin = -1;
-    xmax = 1;
-    ymin = -1;
-    ymax = 1;
+    xmin = -0.5;
+    xmax = 0.5;
+    ymin = -0.5;
+    ymax = 0.5;
 
     // Calcula a resolução Y
     yres = (xres * (ymax - ymin)) / (xmax - xmin);
@@ -87,20 +87,20 @@ int main(int argc, char* argv[]) {
     // Cria a thread que irá desenhar na tela
     pthread_create(&thread_printer, NULL, print_mandelbrot, NULL);
 
-    int xi, yi = 0;
-    int xf, yf = 0;
+    int xi = 0, yi = 0;
+    int xf = 0, yf = 0;
 
     // Laço de inserção no buffer de trabalho
     while (xf <= xres || yf <= yres) {
         xi = xf;
-        yf = yi + yres / 10;
 
         if (xi > xres) {
             xi = 0;
             yi = yf;
         }
         xf = xi + xres / 10;
-
+        yf = yi + yres / 10;
+        
         pthread_mutex_lock(&mutex_work);
 
         // Insere no buffer de trabalho
