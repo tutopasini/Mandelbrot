@@ -23,7 +23,7 @@ struct work {
 };
 
 // Número de threads
-const int NUM_THREADS = 5;
+const int NUM_THREADS = 1;
 // Buffer de trabalho
 struct work buff_trabalho[10000];
 // Buffer de resultado
@@ -64,10 +64,10 @@ int done_result = 0;
 int main(int argc, char* argv[]) {
 
     // Define área que será calculada
-    xmin = -0.5;
-    xmax = 0.5;
-    ymin = -0.5;
-    ymax = 0.5;
+    xmin = -1;
+    xmax = 1;
+    ymin = -1;
+    ymax = 1;
 
     // Calcula a resolução Y
     yres = (xres * (ymax - ymin)) / (xmax - xmin);
